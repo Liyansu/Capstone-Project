@@ -1,0 +1,333 @@
+{
+  "name": "Nutritional Planning Workflow - Simple",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nutritional-planning",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "nutritional-planning-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "photo-check",
+              "leftValue": "={{ $json.message.photo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "photo-check",
+      "name": "Check for Photo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.message.photo[-1].file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-file-info",
+      "name": "Get File Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/file/bot{{ $env.TELEGRAM_BOT_TOKEN }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-photo",
+      "name": "Download Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract dietary information from message text\nconst messageText = $input.first().json.message.text || '';\nconst chatId = $input.first().json.message.chat.id;\nconst userId = $input.first().json.message.from.id;\n\n// Parse dietary measurements from text\nconst dietaryData = {\n  chatId: chatId,\n  userId: userId,\n  weight: null,\n  height: null,\n  age: null,\n  allergies: [],\n  goals: '',\n  activityLevel: 'moderate',\n  gender: 'unknown'\n};\n\n// Extract weight (in kg)\nconst weightMatch = messageText.match(/weight[\\s:]*([0-9.]+)\\s*kg/i);\nif (weightMatch) {\n  dietaryData.weight = parseFloat(weightMatch[1]);\n}\n\n// Extract height (in cm)\nconst heightMatch = messageText.match(/height[\\s:]*([0-9.]+)\\s*cm/i);\nif (heightMatch) {\n  dietaryData.height = parseFloat(heightMatch[1]);\n}\n\n// Extract age\nconst ageMatch = messageText.match(/age[\\s:]*([0-9]+)/i);\nif (ageMatch) {\n  dietaryData.age = parseInt(ageMatch[1]);\n}\n\n// Extract allergies\nconst allergyMatch = messageText.match(/allerg[ies]*[\\s:]*([^,]+)/i);\nif (allergyMatch) {\n  dietaryData.allergies = allergyMatch[1].split(',').map(a => a.trim().toLowerCase());\n}\n\n// Extract goals\nconst goalMatch = messageText.match(/goal[s]*[\\s:]*([^,]+)/i);\nif (goalMatch) {\n  dietaryData.goals = goalMatch[1].trim();\n}\n\n// Extract gender\nconst genderMatch = messageText.match(/gender[\\s:]*([^,]+)/i);\nif (genderMatch) {\n  dietaryData.gender = genderMatch[1].trim().toLowerCase();\n}\n\n// Extract activity level\nconst activityMatch = messageText.match(/activity[\\s:]*([^,]+)/i);\nif (activityMatch) {\n  dietaryData.activityLevel = activityMatch[1].trim().toLowerCase();\n}\n\nreturn {\n  json: {\n    dietaryData: dietaryData,\n    hasPhoto: true,\n    messageText: messageText\n  }\n};"
+      },
+      "id": "parse-dietary-data",
+      "name": "Parse Dietary Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/recognize-foods",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_data",
+              "value": "={{ JSON.stringify($json.dietaryData) }}"
+            }
+          ]
+        },
+        "options": {
+          "bodyContentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "image",
+                "value": "={{ $binary.data }}"
+              },
+              {
+                "name": "user_data",
+                "value": "={{ JSON.stringify($json.dietaryData) }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "food-recognition-api",
+      "name": "Food Recognition API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/generate-meal-plan",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_data",
+              "value": "={{ JSON.stringify($json.dietaryData) }}"
+            }
+          ]
+        },
+        "options": {
+          "bodyContentType": "json"
+        }
+      },
+      "id": "meal-plan-api",
+      "name": "Meal Plan API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the final response for Telegram\nconst foodData = $input.first().json.data || {};\nconst mealPlanData = $input.first().json.data || {};\nconst dietaryData = $input.first().json.dietaryData || {};\n\n// Extract data from API responses\nconst identifiedFoods = foodData.identifiedFoods || [];\nconst totalCalories = foodData.totalCalories || 0;\nconst totalProtein = foodData.totalProtein || 0;\nconst totalCarbs = foodData.totalCarbs || 0;\nconst totalFat = foodData.totalFat || 0;\nconst totalFiber = foodData.totalFiber || 0;\n\nconst bmr = mealPlanData.bmr || 0;\nconst tdee = mealPlanData.tdee || 0;\nconst caloricGoal = mealPlanData.caloric_goal || 0;\nconst nutritionalGoals = mealPlanData.nutritional_goals || {};\nconst mealPlan = mealPlanData.meal_plan || {};\nconst safetyWarnings = mealPlanData.safety_warnings || [];\n\n// Format 7-day meal plan\nfunction formatMealPlan(mealPlan) {\n  if (!mealPlan || Object.keys(mealPlan).length === 0) {\n    return '\\n🍽️ **7-DAY MEAL PLAN**\\n\\n*Meal plan generation in progress...*\\n';\n  }\n  \n  let formatted = '\\n🍽️ **7-DAY MEAL PLAN**\\n\\n';\n  \n  Object.entries(mealPlan).forEach(([day, meals]) => {\n    formatted += `**${day}**\\n`;\n    \n    Object.entries(meals).forEach(([mealType, meal]) => {\n      const emoji = {\n        breakfast: '🌅',\n        lunch: '☀️',\n        dinner: '🌙',\n        snacks: '🍎'\n      }[mealType] || '🍽️';\n      \n      formatted += `${emoji} **${mealType.charAt(0).toUpperCase() + mealType.slice(1)}** (${meal.calories} cal)\\n`;\n      if (meal.foods && meal.foods.length > 0) {\n        formatted += `   • ${meal.foods.join(', ')}\\n`;\n      }\n      formatted += `   • Protein: ${meal.protein}g | Carbs: ${meal.carbs}g | Fat: ${meal.fat}g\\n\\n`;\n    });\n  });\n  \n  return formatted;\n}\n\n// Format safety warnings\nfunction formatSafetyWarnings(warnings) {\n  if (!warnings || warnings.length === 0) return '';\n  \n  let formatted = '\\n⚠️ **SAFETY WARNINGS**\\n\\n';\n  \n  warnings.forEach(warning => {\n    formatted += `🚨 **${warning.allergen.toUpperCase()} ALLERGY DETECTED**\\n`;\n    if (warning.found_in && warning.found_in.length > 0) {\n      formatted += `Found in: ${warning.found_in.join(', ')}\\n\\n`;\n    }\n  });\n  \n  return formatted;\n}\n\n// Format current meal analysis\nfunction formatCurrentMealAnalysis() {\n  if (identifiedFoods.length === 0) {\n    return '\\n📊 **CURRENT MEAL ANALYSIS**\\n\\n*No food items identified in the image.*\\n';\n  }\n  \n  let formatted = '\\n📊 **CURRENT MEAL ANALYSIS**\\n\\n';\n  \n  formatted += `**Identified Foods:**\\n`;\n  identifiedFoods.forEach(food => {\n    formatted += `• ${food.name} (${food.confidence ? Math.round(food.confidence * 100) : 0}% confidence)\\n`;\n  });\n  \n  formatted += `\\n**Nutritional Breakdown:**\\n`;\n  formatted += `• Calories: ${totalCalories}\\n`;\n  formatted += `• Protein: ${totalProtein}g\\n`;\n  formatted += `• Carbs: ${totalCarbs}g\\n`;\n  formatted += `• Fat: ${totalFat}g\\n`;\n  formatted += `• Fiber: ${totalFiber}g\\n\\n`;\n  \n  if (caloricGoal > 0) {\n    const remainingCalories = caloricGoal - totalCalories;\n    formatted += `**Daily Progress:**\\n`;\n    formatted += `• Daily Goal: ${caloricGoal} calories\\n`;\n    formatted += `• Remaining: ${remainingCalories} calories\\n`;\n    formatted += `• Progress: ${Math.round((totalCalories / caloricGoal) * 100)}%\\n\\n`;\n  }\n  \n  return formatted;\n}\n\n// Create the complete response\nconst response = `\n🥗 **PERSONALIZED NUTRITIONAL PLAN** 🥗\n\n📋 **YOUR METABOLIC PROFILE**\n• BMR (Basal Metabolic Rate): ${bmr} calories/day\n• TDEE (Total Daily Energy Expenditure): ${tdee} calories/day\n• Recommended Daily Intake: ${caloricGoal} calories/day\n\n🎯 **MACRONUTRIENT TARGETS**\n• Protein: ${nutritionalGoals.protein || 0}g (${Math.round((nutritionalGoals.protein || 0) * 4)} cal)\n• Carbohydrates: ${nutritionalGoals.carbs || 0}g (${Math.round((nutritionalGoals.carbs || 0) * 4)} cal)\n• Fat: ${nutritionalGoals.fat || 0}g (${Math.round((nutritionalGoals.fat || 0) * 9)} cal)\n\n${formatCurrentMealAnalysis()}\n${formatMealPlan(mealPlan)}\n${formatSafetyWarnings(safetyWarnings)}\n\n💡 **TIPS FOR SUCCESS**\n• Stay hydrated with 8-10 glasses of water daily\n• Track your meals consistently\n• Listen to your body's hunger cues\n• Include variety in your diet\n• Don't forget to exercise regularly!\n\n🤖 *This plan was generated using AI-powered food recognition and personalized dietary algorithms.*\n`;\n\nreturn {\n  json: {\n    chatId: dietaryData.chatId || 'unknown',\n    message: response,\n    parseMode: 'Markdown'\n  }\n};"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "={{ $json.parseMode }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-telegram-response",
+      "name": "Send Telegram Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Nutritional analysis completed and sent to user\",\n  \"timestamp\": new Date().toISOString()\n}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"No photo provided. Please send a photo of your meal along with your dietary information.\",\n  \"timestamp\": new Date().toISOString()\n}"
+      },
+      "id": "no-photo-response",
+      "name": "No Photo Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check for Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Photo": {
+      "main": [
+        [
+          {
+            "node": "Get File Info",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Parse Dietary Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Photo Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Info": {
+      "main": [
+        [
+          {
+            "node": "Download Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Photo": {
+      "main": [
+        [
+          {
+            "node": "Food Recognition API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Dietary Data": {
+      "main": [
+        [
+          {
+            "node": "Food Recognition API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Food Recognition API": {
+      "main": [
+        [
+          {
+            "node": "Meal Plan API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meal Plan API": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Response": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
