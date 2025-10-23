@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  python-services:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nutritional-workflow-services
+    ports:
+      - "5000:5000"  # Food Image Analyzer
+      - "5001:5001"  # Dietary Planner
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PYTHON_SERVICE_URL=http://localhost:5000
+      - DIETARY_SERVICE_URL=http://localhost:5001
+      - USE_GPU=${USE_GPU:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./models:/app/models  # Mount for ML models
+    restart: unless-stopped
+    networks:
+      - nutritional-network
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: nutritional-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - nutritional-network
+
+  # Optional: PostgreSQL for nutrition database
+  postgres:
+    image: postgres:15-alpine
+    container_name: nutritional-postgres
+    environment:
+      - POSTGRES_DB=nutrition_db
+      - POSTGRES_USER=nutrition_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - nutritional-network
+
+networks:
+  nutritional-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-data:

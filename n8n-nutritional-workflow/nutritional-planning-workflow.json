@@ -1,0 +1,243 @@
+{
+  "name": "Nutritional Planning Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "nutritional-bot",
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "jsonToCsv",
+        "options": {}
+      },
+      "id": "extract-user-data",
+      "name": "Extract User Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "notesInFlow": true,
+      "notes": "Parse user message for dietary measurements and extract photo"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract and structure user input data\nconst message = $input.item.json.message;\nconst chatId = message.chat.id;\nconst userId = message.from.id;\n\n// Extract photo if present\nlet photoFileId = null;\nif (message.photo && message.photo.length > 0) {\n  // Get the largest photo version\n  const photos = message.photo;\n  photoFileId = photos[photos.length - 1].file_id;\n}\n\n// Extract text data from message caption or text\nconst messageText = message.caption || message.text || '';\n\n// Parse dietary measurements from text\n// Expected format: weight:75kg, height:175cm, age:30, allergies:nuts, goal:lose 5kg\nconst userData = {\n  chatId: chatId,\n  userId: userId,\n  photoFileId: photoFileId,\n  messageText: messageText,\n  timestamp: new Date().toISOString()\n};\n\n// Parse measurements using regex\nconst weightMatch = messageText.match(/weight[:\\s]+(\\d+\\.?\\d*)\\s*kg/i);\nconst heightMatch = messageText.match(/height[:\\s]+(\\d+\\.?\\d*)\\s*cm/i);\nconst ageMatch = messageText.match(/age[:\\s]+(\\d+)/i);\nconst genderMatch = messageText.match(/gender[:\\s]+(male|female)/i);\nconst allergiesMatch = messageText.match(/allergies[:\\s]+([^,]+)/i);\nconst goalMatch = messageText.match(/goal[:\\s]+(.+?)(?:,|$)/i);\n\nif (weightMatch) userData.weight = parseFloat(weightMatch[1]);\nif (heightMatch) userData.height = parseFloat(heightMatch[1]);\nif (ageMatch) userData.age = parseInt(ageMatch[1]);\nif (genderMatch) userData.gender = genderMatch[1].toLowerCase();\nif (allergiesMatch) userData.allergies = allergiesMatch[1].trim();\nif (goalMatch) userData.goal = goalMatch[1].trim();\n\nreturn { json: userData };"
+      },
+      "id": "parse-user-input",
+      "name": "Parse User Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getFile",
+        "fileId": "={{ $json.photoFileId }}",
+        "additionalFields": {}
+      },
+      "id": "download-food-photo",
+      "name": "Download Food Photo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [850, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PYTHON_SERVICE_URL }}/analyze-food-image",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.file_path }}"
+            },
+            {
+              "name": "telegram_file_id",
+              "value": "={{ $node['Parse User Input'].json.photoFileId }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "analyze-food-image",
+      "name": "Analyze Food Image (Python)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 200],
+      "notes": "Calls Python service for food recognition and calorie estimation"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PYTHON_SERVICE_URL }}/generate-meal-plan",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "user_data": "={{ $node['Parse User Input'].json }}",
+          "meal_analysis": "={{ $node['Analyze Food Image (Python)'].json }}"
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "generate-dietary-plan",
+      "name": "Generate Dietary Plan (Python)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300],
+      "notes": "Calls Python service for personalized 7-day dietary plan generation"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format the complete nutritional response\nconst userData = $node['Parse User Input'].json;\nconst mealAnalysis = $node['Analyze Food Image (Python)'].json;\nconst dietaryPlan = $node['Generate Dietary Plan (Python)'].json;\n\n// Build formatted message\nlet message = '🍽️ **NUTRITIONAL ANALYSIS COMPLETE** 🍽️\\n\\n';\n\n// Current meal analysis\nmessage += '📸 **Current Meal Analysis:**\\n';\nmessage += `- Detected Foods: ${mealAnalysis.detected_foods.join(', ')}\\n`;\nmessage += `- Estimated Calories: ${mealAnalysis.total_calories} kcal\\n`;\nmessage += `- Protein: ${mealAnalysis.macros.protein}g\\n`;\nmessage += `- Carbs: ${mealAnalysis.macros.carbs}g\\n`;\nmessage += `- Fats: ${mealAnalysis.macros.fats}g\\n\\n`;\n\n// BMR and TDEE\nmessage += '📊 **Your Metabolic Profile:**\\n';\nmessage += `- BMR: ${dietaryPlan.bmr} kcal/day\\n`;\nmessage += `- TDEE: ${dietaryPlan.tdee} kcal/day\\n`;\nmessage += `- Recommended Daily Intake: ${dietaryPlan.recommended_calories} kcal/day\\n\\n`;\n\n// Allergy warnings\nif (mealAnalysis.allergy_warnings && mealAnalysis.allergy_warnings.length > 0) {\n  message += '⚠️ **ALLERGY WARNING:**\\n';\n  mealAnalysis.allergy_warnings.forEach(warning => {\n    message += `- ${warning}\\n`;\n  });\n  message += '\\n';\n}\n\n// 7-day meal plan\nmessage += '📅 **Your 7-Day Personalized Meal Plan:**\\n\\n';\ndietaryPlan.weekly_plan.forEach((day, index) => {\n  message += `**Day ${index + 1} (${day.total_calories} kcal)**\\n`;\n  message += `🌅 Breakfast: ${day.breakfast.name} (${day.breakfast.calories} kcal)\\n`;\n  message += `🌞 Lunch: ${day.lunch.name} (${day.lunch.calories} kcal)\\n`;\n  message += `🌙 Dinner: ${day.dinner.name} (${day.dinner.calories} kcal)\\n`;\n  message += `🍎 Snacks: ${day.snacks.name} (${day.snacks.calories} kcal)\\n`;\n  message += `📈 Macros - P: ${day.macros.protein}g, C: ${day.macros.carbs}g, F: ${day.macros.fats}g\\n\\n`;\n});\n\n// Progress tracking\nmessage += '💪 **Progress Tracking Tips:**\\n';\nmessage += `- Goal: ${userData.goal}\\n`;\nmessage += `- Estimated Timeline: ${dietaryPlan.estimated_timeline}\\n`;\nmessage += `- Weekly Weight Change: ${dietaryPlan.weekly_weight_change}\\n\\n`;\n\n// Motivation\nmessage += '✨ **Motivation:**\\n';\nmessage += dietaryPlan.motivation_message;\n\nreturn {\n  json: {\n    chatId: userData.chatId,\n    message: message,\n    parse_mode: 'Markdown'\n  }\n};"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram-response",
+      "name": "Send Telegram Response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1650, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $node['Parse User Input'].json.chatId }}",
+        "text": "❌ An error occurred while processing your request. Please make sure to:\n\n1. Include a photo of your meal\n2. Provide your details in this format:\nweight: XXkg, height: XXcm, age: XX, gender: male/female, allergies: none, goal: your fitness goal\n\nExample:\nweight: 75kg, height: 175cm, age: 30, gender: male, allergies: nuts, goal: lose 5kg",
+        "additionalFields": {}
+      },
+      "id": "send-error-message",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1450, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse User Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse User Input": {
+      "main": [
+        [
+          {
+            "node": "Download Food Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Food Photo": {
+      "main": [
+        [
+          {
+            "node": "Analyze Food Image (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Food Image (Python)": {
+      "main": [
+        [
+          {
+            "node": "Generate Dietary Plan (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Dietary Plan (Python)": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-10-23T00:00:00.000Z",
+  "versionId": "1"
+}
