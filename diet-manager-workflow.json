@@ -1,0 +1,275 @@
+{
+  "name": "Diet Manager Food Analysis Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "diet-manager",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "diet-manager-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-image",
+              "leftValue": "={{ $json.message.photo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-image-exists",
+      "name": "Check Image Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.message.photo[-1].file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-telegram-file",
+      "name": "Get Telegram File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/file/bot{{ $env.TELEGRAM_BOT_TOKEN }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-image",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Food Analysis Python Script Execution\nconst { spawn } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\n\n// Save image data to temporary file\nconst imageBuffer = $input.first().binary.data.data;\nconst tempImagePath = `/tmp/food_image_${Date.now()}.jpg`;\nfs.writeFileSync(tempImagePath, imageBuffer);\n\n// Execute Python food analysis script\nreturn new Promise((resolve, reject) => {\n  const pythonProcess = spawn('python3', [\n    '/workspace/food_analysis.py',\n    '--image', tempImagePath,\n    '--user-data', JSON.stringify({\n      height: $json.message.text?.includes('height:') ? parseFloat($json.message.text.split('height:')[1].split(' ')[0]) : 170,\n      weight: $json.message.text?.includes('weight:') ? parseFloat($json.message.text.split('weight:')[1].split(' ')[0]) : 70,\n      age: $json.message.text?.includes('age:') ? parseInt($json.message.text.split('age:')[1].split(' ')[0]) : 30,\n      gender: $json.message.text?.includes('gender:') ? $json.message.text.split('gender:')[1].split(' ')[0] : 'male',\n      ethnicity: $json.message.text?.includes('ethnicity:') ? $json.message.text.split('ethnicity:')[1].split(' ')[0] : 'caucasian',\n      daily_calories: $json.message.text?.includes('calories:') ? parseInt($json.message.text.split('calories:')[1].split(' ')[0]) : 2000,\n      sugar_limit: $json.message.text?.includes('sugar:') ? parseInt($json.message.text.split('sugar:')[1].split(' ')[0]) : 50\n    })\n  ]);\n\n  let output = '';\n  let errorOutput = '';\n\n  pythonProcess.stdout.on('data', (data) => {\n    output += data.toString();\n  });\n\n  pythonProcess.stderr.on('data', (data) => {\n    errorOutput += data.toString();\n  });\n\n  pythonProcess.on('close', (code) => {\n    // Clean up temporary file\n    try {\n      fs.unlinkSync(tempImagePath);\n    } catch (err) {\n      console.log('Could not delete temp file:', err);\n    }\n\n    if (code === 0) {\n      try {\n        const result = JSON.parse(output);\n        resolve([{ json: result }]);\n      } catch (parseError) {\n        reject(new Error(`Failed to parse Python output: ${parseError.message}\\nOutput: ${output}`));\n      }\n    } else {\n      reject(new Error(`Python script failed with code ${code}: ${errorOutput}`));\n    }\n  });\n});"
+      },
+      "id": "food-analysis-script",
+      "name": "Food Analysis Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process analysis results and format response\nconst analysis = $input.first().json;\n\n// Calculate compliance score\nlet complianceScore = 100;\nlet warnings = [];\nlet recommendations = [];\n\n// Check calorie compliance\nconst calorieRatio = analysis.total_calories / analysis.user_data.daily_calories;\nif (calorieRatio > 0.3) {\n  complianceScore -= 20;\n  warnings.push(`High calorie content: ${analysis.total_calories} calories (${Math.round(calorieRatio * 100)}% of daily limit)`);\n}\n\n// Check sugar compliance\nconst sugarRatio = analysis.total_sugar / analysis.user_data.sugar_limit;\nif (sugarRatio > 0.2) {\n  complianceScore -= 15;\n  warnings.push(`High sugar content: ${analysis.total_sugar}g (${Math.round(sugarRatio * 100)}% of daily limit)`);\n}\n\n// Check sodium compliance\nif (analysis.total_sodium > 600) {\n  complianceScore -= 10;\n  warnings.push(`High sodium content: ${analysis.total_sodium}mg`);\n}\n\n// Generate recommendations\nif (analysis.total_calories > analysis.user_data.daily_calories * 0.25) {\n  recommendations.push('Consider reducing portion size or choosing lower-calorie alternatives');\n}\n\nif (analysis.total_sugar > analysis.user_data.sugar_limit * 0.15) {\n  recommendations.push('Look for sugar-free or reduced-sugar versions of ingredients');\n}\n\nif (analysis.total_fat > 30) {\n  recommendations.push('Consider cooking methods that reduce fat content (baking, grilling)');\n}\n\n// Determine compliance status\nlet complianceStatus = 'COMPLIANT';\nif (complianceScore < 70) {\n  complianceStatus = 'NON_COMPLIANT';\n} else if (complianceScore < 85) {\n  complianceStatus = 'MODERATE_COMPLIANCE';\n}\n\n// Format response message\nlet responseMessage = `🍽️ *Food Analysis Results*\\n\\n`;\nresponseMessage += `*Cuisine:* ${analysis.cuisine_type}\\n`;\nresponseMessage += `*Dish:* ${analysis.dish_name}\\n\\n`;\nresponseMessage += `*Nutritional Information:*\\n`;\nresponseMessage += `• Calories: ${analysis.total_calories}\\n`;\nresponseMessage += `• Protein: ${analysis.total_protein}g\\n`;\nresponseMessage += `• Carbs: ${analysis.total_carbs}g\\n`;\nresponseMessage += `• Fat: ${analysis.total_fat}g\\n`;\nresponseMessage += `• Sugar: ${analysis.total_sugar}g\\n`;\nresponseMessage += `• Sodium: ${analysis.total_sodium}mg\\n\\n`;\n\nresponseMessage += `*Compliance Status:* ${complianceStatus}\\n`;\nresponseMessage += `*Score:* ${complianceScore}/100\\n\\n`;\n\nif (warnings.length > 0) {\n  responseMessage += `*⚠️ Warnings:*\\n`;\n  warnings.forEach(warning => {\n    responseMessage += `• ${warning}\\n`;\n  });\n  responseMessage += `\\n`;\n}\n\nif (recommendations.length > 0) {\n  responseMessage += `*💡 Recommendations:*\\n`;\n  recommendations.forEach(rec => {\n    responseMessage += `• ${rec}\\n`;\n  });\n}\n\n// Add ingredient breakdown\nif (analysis.ingredients && analysis.ingredients.length > 0) {\n  responseMessage += `\\n*Ingredient Breakdown:*\\n`;\n  analysis.ingredients.slice(0, 5).forEach(ingredient => {\n    responseMessage += `• ${ingredient.name}: ${ingredient.calories} cal, ${ingredient.protein}g protein\\n`;\n  });\n  if (analysis.ingredients.length > 5) {\n    responseMessage += `• ... and ${analysis.ingredients.length - 5} more ingredients\\n`;\n  }\n}\n\nreturn [{\n  json: {\n    chat_id: $('Webhook Trigger').first().json.message.chat.id,\n    text: responseMessage,\n    parse_mode: 'Markdown',\n    analysis_data: analysis,\n    compliance_status: complianceStatus,\n    compliance_score: complianceScore\n  }\n}];"
+      },
+      "id": "process-results",
+      "name": "Process Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendQuery": false,
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chat_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "={{ $json.parse_mode }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Please send an image of your food along with your health parameters in this format:\\n\\nheight: 175\\nweight: 70\\nage: 30\\ngender: male\\nethnicity: caucasian\\ncalories: 2000\\nsugar: 50\\n\\nExample: Send a photo of pasta with the text above to get diet compliance analysis."
+      },
+      "id": "no-image-response",
+      "name": "No Image Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Image received! Analyzing your food for diet compliance..."
+      },
+      "id": "acknowledge-image",
+      "name": "Acknowledge Image",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Analysis complete! Check your Telegram chat for detailed results."
+      },
+      "id": "final-response",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Image Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Image Exists": {
+      "main": [
+        [
+          {
+            "node": "Get Telegram File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Image Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Telegram File": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Food Analysis Script",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Acknowledge Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Food Analysis Script": {
+      "main": [
+        [
+          {
+            "node": "Process Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Results": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [
+          {
+            "node": "Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "diet-manager",
+      "name": "Diet Manager"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
