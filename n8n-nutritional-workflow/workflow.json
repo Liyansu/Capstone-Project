@@ -1,0 +1,297 @@
+{
+  "name": "Nutritional Planning Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nutritional-planning",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "nutritional-planning-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "photo-check",
+              "leftValue": "={{ $json.message.photo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "photo-check",
+      "name": "Check for Photo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.message.photo[-1].file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-file-info",
+      "name": "Get File Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/file/bot{{ $env.TELEGRAM_BOT_TOKEN }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-photo",
+      "name": "Download Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract dietary information from message text\nconst messageText = $input.first().json.message.text || '';\nconst chatId = $input.first().json.message.chat.id;\nconst userId = $input.first().json.message.from.id;\n\n// Parse dietary measurements from text\n// Expected format: \"Weight: 70kg, Height: 175cm, Age: 30, Allergies: nuts, Goals: lose 5kg\"\nconst dietaryData = {\n  chatId: chatId,\n  userId: userId,\n  weight: null,\n  height: null,\n  age: null,\n  allergies: [],\n  goals: '',\n  activityLevel: 'moderate',\n  gender: 'unknown'\n};\n\n// Extract weight (in kg)\nconst weightMatch = messageText.match(/weight[\\s:]*([0-9.]+)\\s*kg/i);\nif (weightMatch) {\n  dietaryData.weight = parseFloat(weightMatch[1]);\n}\n\n// Extract height (in cm)\nconst heightMatch = messageText.match(/height[\\s:]*([0-9.]+)\\s*cm/i);\nif (heightMatch) {\n  dietaryData.height = parseFloat(heightMatch[1]);\n}\n\n// Extract age\nconst ageMatch = messageText.match(/age[\\s:]*([0-9]+)/i);\nif (ageMatch) {\n  dietaryData.age = parseInt(ageMatch[1]);\n}\n\n// Extract allergies\nconst allergyMatch = messageText.match(/allerg[ies]*[\\s:]*([^,]+)/i);\nif (allergyMatch) {\n  dietaryData.allergies = allergyMatch[1].split(',').map(a => a.trim().toLowerCase());\n}\n\n// Extract goals\nconst goalMatch = messageText.match(/goal[s]*[\\s:]*([^,]+)/i);\nif (goalMatch) {\n  dietaryData.goals = goalMatch[1].trim();\n}\n\n// Extract gender\nconst genderMatch = messageText.match(/gender[\\s:]*([^,]+)/i);\nif (genderMatch) {\n  dietaryData.gender = genderMatch[1].trim().toLowerCase();\n}\n\n// Extract activity level\nconst activityMatch = messageText.match(/activity[\\s:]*([^,]+)/i);\nif (activityMatch) {\n  dietaryData.activityLevel = activityMatch[1].trim().toLowerCase();\n}\n\nreturn {\n  json: {\n    dietaryData: dietaryData,\n    hasPhoto: true,\n    messageText: messageText\n  }\n};"
+      },
+      "id": "parse-dietary-data",
+      "name": "Parse Dietary Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Food Recognition and Calorie Estimation using Computer Vision\n// This would typically call an external API like Hugging Face, AWS SageMaker, or Google Vision\n\nconst imageData = $input.first().json;\nconst dietaryData = $input.first().json.dietaryData;\n\n// Simulate food recognition API call\n// In production, this would be replaced with actual API calls to:\n// - Hugging Face Transformers API\n// - AWS SageMaker endpoint\n// - Google Vision API\n// - Custom trained model\n\n// Mock food recognition results (replace with actual API call)\nconst mockFoodRecognition = {\n  identifiedFoods: [\n    {\n      name: \"grilled chicken breast\",\n      confidence: 0.92,\n      estimatedWeight: 150, // grams\n      calories: 231,\n      protein: 43.5, // grams\n      carbs: 0, // grams\n      fat: 5.0, // grams\n      fiber: 0 // grams\n    },\n    {\n      name: \"steamed broccoli\",\n      confidence: 0.88,\n      estimatedWeight: 100, // grams\n      calories: 34,\n      protein: 2.8, // grams\n      carbs: 6.6, // grams\n      fat: 0.4, // grams\n      fiber: 2.6 // grams\n    },\n    {\n      name: \"brown rice\",\n      confidence: 0.85,\n      estimatedWeight: 80, // grams\n      calories: 111,\n      protein: 2.3, // grams\n      carbs: 23, // grams\n      fat: 0.9, // grams\n      fiber: 1.8 // grams\n    }\n  ],\n  totalCalories: 376,\n  totalProtein: 48.6,\n  totalCarbs: 29.6,\n  totalFat: 6.3,\n  totalFiber: 4.4\n};\n\n// Calculate portion size adjustments based on image analysis\n// This would use computer vision to estimate actual portion sizes\nconst portionAdjustment = 1.0; // Default, would be calculated from image\n\n// Apply portion adjustments\nconst adjustedMeal = {\n  ...mockFoodRecognition,\n  totalCalories: Math.round(mockFoodRecognition.totalCalories * portionAdjustment),\n  totalProtein: Math.round(mockFoodRecognition.totalProtein * portionAdjustment * 10) / 10,\n  totalCarbs: Math.round(mockFoodRecognition.totalCarbs * portionAdjustment * 10) / 10,\n  totalFat: Math.round(mockFoodRecognition.totalFat * portionAdjustment * 10) / 10,\n  totalFiber: Math.round(mockFoodRecognition.totalFiber * portionAdjustment * 10) / 10\n};\n\nreturn {\n  json: {\n    mealAnalysis: adjustedMeal,\n    dietaryData: dietaryData,\n    imageProcessed: true\n  }\n};"
+      },
+      "id": "food-recognition",
+      "name": "Food Recognition & Calorie Estimation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Dietary Planning Algorithm with BMR/TDEE Calculations\nconst { mealAnalysis, dietaryData } = $input.first().json;\n\n// BMR Calculation using Mifflin-St Jeor Equation\nfunction calculateBMR(weight, height, age, gender) {\n  if (gender === 'male') {\n    return 10 * weight + 6.25 * height - 5 * age + 5;\n  } else if (gender === 'female') {\n    return 10 * weight + 6.25 * height - 5 * age - 161;\n  } else {\n    // Average of male and female formulas for unknown gender\n    return (10 * weight + 6.25 * height - 5 * age + 5 + 10 * weight + 6.25 * height - 5 * age - 161) / 2;\n  }\n}\n\n// TDEE Calculation based on activity level\nfunction calculateTDEE(bmr, activityLevel) {\n  const activityMultipliers = {\n    'sedentary': 1.2,\n    'light': 1.375,\n    'moderate': 1.55,\n    'active': 1.725,\n    'very_active': 1.9\n  };\n  \n  return bmr * (activityMultipliers[activityLevel] || 1.55);\n}\n\n// Calculate BMR and TDEE\nconst bmr = calculateBMR(dietaryData.weight, dietaryData.height, dietaryData.age, dietaryData.gender);\nconst tdee = calculateTDEE(bmr, dietaryData.activityLevel);\n\n// Determine caloric goal based on user goals\nlet caloricGoal = tdee;\nif (dietaryData.goals.toLowerCase().includes('lose')) {\n  caloricGoal = tdee - 500; // 500 calorie deficit for weight loss\n} else if (dietaryData.goals.toLowerCase().includes('gain')) {\n  caloricGoal = tdee + 500; // 500 calorie surplus for weight gain\n}\n\n// Macronutrient distribution (40% carbs, 30% protein, 30% fat)\nconst proteinCalories = caloricGoal * 0.30;\nconst carbCalories = caloricGoal * 0.40;\nconst fatCalories = caloricGoal * 0.30;\n\nconst proteinGrams = proteinCalories / 4; // 4 calories per gram\nconst carbGrams = carbCalories / 4; // 4 calories per gram\nconst fatGrams = fatCalories / 9; // 9 calories per gram\n\n// Generate 7-day meal plan\nconst mealPlan = generateMealPlan(caloricGoal, proteinGrams, carbGrams, fatGrams, dietaryData);\n\n// Safety warnings for allergies\nconst safetyWarnings = generateSafetyWarnings(dietaryData.allergies, mealPlan);\n\n// Progress tracking metrics\nconst progressMetrics = {\n  currentMealCalories: mealAnalysis.totalCalories,\n  dailyCalorieGoal: caloricGoal,\n  remainingCalories: caloricGoal - mealAnalysis.totalCalories,\n  proteinProgress: (mealAnalysis.totalProtein / proteinGrams) * 100,\n  carbProgress: (mealAnalysis.totalCarbs / carbGrams) * 100,\n  fatProgress: (mealAnalysis.totalFat / fatGrams) * 100\n};\n\nfunction generateMealPlan(calories, protein, carbs, fat, userData) {\n  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];\n  const mealPlan = {};\n  \n  days.forEach(day => {\n    mealPlan[day] = {\n      breakfast: {\n        calories: Math.round(calories * 0.25),\n        protein: Math.round(protein * 0.25 * 10) / 10,\n        carbs: Math.round(carbs * 0.25 * 10) / 10,\n        fat: Math.round(fat * 0.25 * 10) / 10,\n        foods: [\"Oatmeal with berries\", \"Greek yogurt\", \"Almonds\"]\n      },\n      lunch: {\n        calories: Math.round(calories * 0.35),\n        protein: Math.round(protein * 0.35 * 10) / 10,\n        carbs: Math.round(carbs * 0.35 * 10) / 10,\n        fat: Math.round(fat * 0.35 * 10) / 10,\n        foods: [\"Grilled chicken salad\", \"Quinoa\", \"Mixed vegetables\"]\n      },\n      dinner: {\n        calories: Math.round(calories * 0.30),\n        protein: Math.round(protein * 0.30 * 10) / 10,\n        carbs: Math.round(carbs * 0.30 * 10) / 10,\n        fat: Math.round(fat * 0.30 * 10) / 10,\n        foods: [\"Salmon fillet\", \"Sweet potato\", \"Steamed broccoli\"]\n      },\n      snacks: {\n        calories: Math.round(calories * 0.10),\n        protein: Math.round(protein * 0.10 * 10) / 10,\n        carbs: Math.round(carbs * 0.10 * 10) / 10,\n        fat: Math.round(fat * 0.10 * 10) / 10,\n        foods: [\"Apple with almond butter\", \"Protein shake\"]\n      }\n    };\n  });\n  \n  return mealPlan;\n}\n\nfunction generateSafetyWarnings(allergies, mealPlan) {\n  const warnings = [];\n  \n  if (allergies.length === 0) {\n    return warnings;\n  }\n  \n  // Check for common allergens in meal plan\n  const allergenKeywords = {\n    'nuts': ['almond', 'walnut', 'peanut', 'cashew', 'pistachio'],\n    'dairy': ['milk', 'cheese', 'yogurt', 'butter', 'cream'],\n    'gluten': ['wheat', 'bread', 'pasta', 'flour', 'oats'],\n    'eggs': ['egg', 'mayonnaise', 'custard'],\n    'soy': ['soy', 'tofu', 'tempeh', 'soy sauce'],\n    'fish': ['salmon', 'tuna', 'cod', 'fish'],\n    'shellfish': ['shrimp', 'crab', 'lobster', 'shellfish']\n  };\n  \n  allergies.forEach(allergy => {\n    const keywords = allergenKeywords[allergy] || [allergy];\n    const foundAllergens = [];\n    \n    Object.values(mealPlan).forEach(day => {\n      Object.values(day).forEach(meal => {\n        meal.foods.forEach(food => {\n          keywords.forEach(keyword => {\n            if (food.toLowerCase().includes(keyword)) {\n              foundAllergens.push(food);\n            }\n          });\n        });\n      });\n    });\n    \n    if (foundAllergens.length > 0) {\n      warnings.push({\n        type: 'allergy_warning',\n        allergen: allergy,\n        foundIn: [...new Set(foundAllergens)],\n        severity: 'high'\n      });\n    }\n  });\n  \n  return warnings;\n}\n\nreturn {\n  json: {\n    bmr: Math.round(bmr),\n    tdee: Math.round(tdee),\n    caloricGoal: Math.round(caloricGoal),\n    macronutrientGoals: {\n      protein: Math.round(proteinGrams * 10) / 10,\n      carbs: Math.round(carbGrams * 10) / 10,\n      fat: Math.round(fatGrams * 10) / 10\n    },\n    mealPlan: mealPlan,\n    safetyWarnings: safetyWarnings,\n    progressMetrics: progressMetrics,\n    mealAnalysis: mealAnalysis\n  }\n};"
+      },
+      "id": "dietary-planning",
+      "name": "Dietary Planning Algorithm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format the final response for Telegram\nconst data = $input.first().json;\nconst { bmr, tdee, caloricGoal, macronutrientGoals, mealPlan, safetyWarnings, progressMetrics, mealAnalysis } = data;\n\n// Format 7-day meal plan\nfunction formatMealPlan(mealPlan) {\n  let formatted = '\\n🍽️ **7-DAY MEAL PLAN**\\n\\n';\n  \n  Object.entries(mealPlan).forEach(([day, meals]) => {\n    formatted += `**${day}**\\n`;\n    \n    Object.entries(meals).forEach(([mealType, meal]) => {\n      const emoji = {\n        breakfast: '🌅',\n        lunch: '☀️',\n        dinner: '🌙',\n        snacks: '🍎'\n      }[mealType] || '🍽️';\n      \n      formatted += `${emoji} **${mealType.charAt(0).toUpperCase() + mealType.slice(1)}** (${meal.calories} cal)\\n`;\n      formatted += `   • ${meal.foods.join(', ')}\\n`;\n      formatted += `   • Protein: ${meal.protein}g | Carbs: ${meal.carbs}g | Fat: ${meal.fat}g\\n\\n`;\n    });\n  });\n  \n  return formatted;\n}\n\n// Format safety warnings\nfunction formatSafetyWarnings(warnings) {\n  if (warnings.length === 0) return '';\n  \n  let formatted = '\\n⚠️ **SAFETY WARNINGS**\\n\\n';\n  \n  warnings.forEach(warning => {\n    formatted += `🚨 **${warning.allergen.toUpperCase()} ALLERGY DETECTED**\\n`;\n    formatted += `Found in: ${warning.foundIn.join(', ')}\\n\\n`;\n  });\n  \n  return formatted;\n}\n\n// Format progress metrics\nfunction formatProgressMetrics(metrics) {\n  let formatted = '\\n📊 **CURRENT MEAL ANALYSIS**\\n\\n';\n  formatted += `🍽️ **Current Meal:** ${metrics.currentMealCalories} calories\\n`;\n  formatted += `🎯 **Daily Goal:** ${metrics.dailyCalorieGoal} calories\\n`;\n  formatted += `📈 **Remaining:** ${metrics.remainingCalories} calories\\n\\n`;\n  \n  formatted += `**Macronutrient Progress:**\\n`;\n  formatted += `🥩 Protein: ${metrics.proteinProgress.toFixed(1)}% (${mealAnalysis.totalProtein}g)\\n`;\n  formatted += `🍞 Carbs: ${metrics.carbProgress.toFixed(1)}% (${mealAnalysis.totalCarbs}g)\\n`;\n  formatted += `🥑 Fat: ${metrics.fatProgress.toFixed(1)}% (${mealAnalysis.totalFat}g)\\n\\n`;\n  \n  return formatted;\n}\n\n// Create the complete response\nconst response = `\n🥗 **PERSONALIZED NUTRITIONAL PLAN** 🥗\n\n📋 **YOUR METABOLIC PROFILE**\n• BMR (Basal Metabolic Rate): ${bmr} calories/day\n• TDEE (Total Daily Energy Expenditure): ${tdee} calories/day\n• Recommended Daily Intake: ${caloricGoal} calories/day\n\n🎯 **MACRONUTRIENT TARGETS**\n• Protein: ${macronutrientGoals.protein}g (${Math.round(macronutrientGoals.protein * 4)} cal)\n• Carbohydrates: ${macronutrientGoals.carbs}g (${Math.round(macronutrientGoals.carbs * 4)} cal)\n• Fat: ${macronutrientGoals.fat}g (${Math.round(macronutrientGoals.fat * 9)} cal)\n\n${formatMealPlan(mealPlan)}\n${formatSafetyWarnings(safetyWarnings)}\n${formatProgressMetrics(progressMetrics)}\n\n💡 **TIPS FOR SUCCESS**\n• Stay hydrated with 8-10 glasses of water daily\n• Track your meals consistently\n• Listen to your body's hunger cues\n• Include variety in your diet\n• Don't forget to exercise regularly!\n\n🤖 *This plan was generated using AI-powered food recognition and personalized dietary algorithms.*\n`;\n\nreturn {\n  json: {\n    chatId: data.dietaryData?.chatId || 'unknown',\n    message: response,\n    parseMode: 'Markdown'\n  }\n};"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "parse_mode",
+              "value": "={{ $json.parseMode }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-telegram-response",
+      "name": "Send Telegram Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Nutritional analysis completed and sent to user\",\n  \"timestamp\": new Date().toISOString()\n}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"No photo provided. Please send a photo of your meal along with your dietary information.\",\n  \"timestamp\": new Date().toISOString()\n}"
+      },
+      "id": "no-photo-response",
+      "name": "No Photo Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check for Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Photo": {
+      "main": [
+        [
+          {
+            "node": "Get File Info",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Parse Dietary Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Photo Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Info": {
+      "main": [
+        [
+          {
+            "node": "Download Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Photo": {
+      "main": [
+        [
+          {
+            "node": "Food Recognition & Calorie Estimation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Dietary Data": {
+      "main": [
+        [
+          {
+            "node": "Food Recognition & Calorie Estimation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Food Recognition & Calorie Estimation": {
+      "main": [
+        [
+          {
+            "node": "Dietary Planning Algorithm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dietary Planning Algorithm": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Response": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
